@@ -111,6 +111,8 @@ public static class GameLaunchService
                     return false;
                 }
 
+                await WindowsRunnerService.EnsureCrossOverBottleAsync(runnerCommand.FileName, runnerCommand.Arguments);
+
                 startInfo.UseShellExecute = false;
                 startInfo.WorkingDirectory = gamePath;
                 startInfo.FileName = runnerCommand.FileName;

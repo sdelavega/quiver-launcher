@@ -132,6 +132,110 @@ public static class WindowsRunnerService
         return isMacOS ? GetMacWineCandidates(homeDirectory).FirstOrDefault(fileExists) : null;
     }
 
+    /// <summary>CrossOver bottle Quiver creates and uses by default, so it never changes the user's own bottles.</summary>
+    public const string CrossOverBottleName = "Quiver Launcher";
+
+    private const string CrossOverWineSuffix = "CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine";
+    private static readonly SemaphoreSlim CrossOverBottleLock = new(1, 1);
+
+    /// <summary>CrossOver's <c>wine</c> launcher, which runs a Windows program in a named bottle.</summary>
+    public static string? FindCrossOverWine()
+    {
+        if (!OperatingSystem.IsMacOS())
+            return null;
+
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return new[] { "/Applications", Path.Combine(home, "Applications") }
+            .Select(applications => Path.Combine(applications, CrossOverWineSuffix))
+            .FirstOrDefault(File.Exists);
+    }
+
+    public static string CrossOverBottlesDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        "Library", "Application Support", "CrossOver", "Bottles");
+
+    /// <summary>Existing CrossOver bottles, by name.</summary>
+    public static IReadOnlyList<string> ListCrossOverBottles(string? bottlesDirectory = null)
+    {
+        var directory = bottlesDirectory ?? CrossOverBottlesDirectory;
+        if (!Directory.Exists(directory))
+            return [];
+
+        return Directory.EnumerateDirectories(directory)
+            .Where(bottle => File.Exists(Path.Combine(bottle, "cxbottle.conf")))
+            .Select(Path.GetFileName)
+            .OfType<string>()
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>Custom-command template that runs an app in a CrossOver bottle.</summary>
+    public static string BuildCrossOverCommandTemplate(string crossOverWine, string bottle) =>
+        $"\"{crossOverWine}\" --bottle \"{bottle.Replace("\"", string.Empty)}\" {{exe}}";
+
+    internal static WindowsRunnerCommandSpec BuildCrossOverCommand(string crossOverWine, string bottle, string executablePath) =>
+        new()
+        {
+            FileName = crossOverWine,
+            Arguments = ["--bottle", bottle, executablePath],
+        };
+
+    /// <summary>
+    /// Creates Quiver's own CrossOver bottle the first time a command uses it (takes ~20 seconds).
+    /// Other bottles are never created or modified; a missing one is left for CrossOver to report.
+    /// </summary>
+    public static Task EnsureCrossOverBottleAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default) =>
+        EnsureCrossOverBottleAsync(fileName, arguments, CrossOverBottlesDirectory, cancellationToken);
+
+    internal static async Task EnsureCrossOverBottleAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string bottlesDirectory,
+        CancellationToken cancellationToken)
+    {
+        if (!fileName.EndsWith(CrossOverWineSuffix, StringComparison.Ordinal))
+            return;
+
+        var bottleIndex = arguments.ToList().IndexOf("--bottle") + 1;
+        if (bottleIndex == 0 || bottleIndex >= arguments.Count || arguments[bottleIndex] != CrossOverBottleName)
+            return;
+
+        await CrossOverBottleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (ListCrossOverBottles(bottlesDirectory).Contains(CrossOverBottleName))
+                return;
+
+            var startInfo = new ProcessStartInfo(Path.Combine(Path.GetDirectoryName(fileName)!, "cxbottle"))
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            foreach (var argument in new[]
+                     {
+                         "--bottle", CrossOverBottleName, "--create", "--template", "win10_64",
+                         "--description", "Created by Quiver Launcher for Windows apps",
+                     })
+                startInfo.ArgumentList.Add(argument);
+
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Could not start CrossOver's cxbottle.");
+            var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var error = await process.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            await output.ConfigureAwait(false);
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException(
+                    $"CrossOver could not create the \"{CrossOverBottleName}\" bottle: {error.Trim()}");
+        }
+        finally
+        {
+            CrossOverBottleLock.Release();
+        }
+    }
+
     private static (string? Binary, long CheckedAt) _wineLookup = (null, long.MinValue);
 
     // Download selection and status checks ask for every app; don't spawn `which` each time.
@@ -242,11 +346,19 @@ public static class WindowsRunnerService
         if (proton != null)
             return proton;
 
-        return BuildWineCommand(executablePath, gamePath, game?.LinuxPrefixPath);
+        var wine = BuildWineCommand(executablePath, gamePath, game?.LinuxPrefixPath);
+        if (wine != null)
+            return wine;
+
+        // macOS without Wine: CrossOver, in Quiver's own bottle.
+        var crossOver = FindCrossOverWine();
+        return crossOver == null ? null : BuildCrossOverCommand(crossOver, CrossOverBottleName, executablePath);
     }
 
     public static LinuxWindowsRunnerKind GetPreferredDefaultKind()
     {
+        if (OperatingSystem.IsMacOS() && !IsWineAvailable() && FindCrossOverWine() != null)
+            return LinuxWindowsRunnerKind.Auto;
         if (ListDetectedProtonInstallations().Count > 0)
             return LinuxWindowsRunnerKind.Proton;
         if (IsWineAvailable())
@@ -442,7 +554,7 @@ public static class WindowsRunnerService
             return true;
 
         if (!OperatingSystem.IsLinux())
-            return false;
+            return FindCrossOverWine() != null;
 
         foreach (var protonInstallation in GetProtonInstallations())
         {

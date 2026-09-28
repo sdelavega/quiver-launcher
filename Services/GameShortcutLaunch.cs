@@ -55,6 +55,7 @@ public static class GameShortcutLaunch
         if (ShortcutHelper.IsAppImageMountPath(executable))
             throw new InvalidOperationException("Choose the installed executable, not a temporary AppImage mount path.");
         var target = BuildTarget(game, executable, gamePath, settings);
+        await WindowsRunnerService.EnsureCrossOverBottleAsync(target.FileName, target.Arguments, cancellationToken);
         // Persist even a previous in-memory choice before a deferred Steam worker starts.
         await File.WriteAllTextAsync(Path.Combine(gamePath, "selected_executable.txt"), executable, cancellationToken);
         game.SelectedExecutable = executable;

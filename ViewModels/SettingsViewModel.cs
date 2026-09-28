@@ -142,7 +142,9 @@ public class SettingsViewModel : ObservableViewModel
     public string WindowsRunnerSettingsHelp =>
         "Global override for Windows-only apps when an app uses Auto. Use {exe}, {gamePath}, or {exeDir}. " +
         "Per-app runner/prefix is under Launch Options → Windows Runner. " +
-        (OperatingSystem.IsMacOS() ? "Leave blank to auto-detect Wine." : "Leave blank to auto-detect Proton then Wine.");
+        (OperatingSystem.IsMacOS()
+            ? $"Leave blank to use Wine, or else CrossOver in its own “{WindowsRunnerService.CrossOverBottleName}” bottle."
+            : "Leave blank to auto-detect Proton then Wine.");
     public bool ShowStartFullscreenSetting => IsDesktopPlatform && !SteamDeckEnvironment.IsDesktopMode();
 
     public AppSettings Load()

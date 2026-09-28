@@ -109,7 +109,7 @@ public class SettingsViewModelTests
         var command = view.FindControl<TextBox>("LinuxWindowsLaunchCommandTextBox")!;
         ((Control)command.Parent!).IsVisible.Should().BeTrue();
         command.PlaceholderText.Should().Contain("CrossOver");
-        model.WindowsRunnerSettingsHelp.Should().Contain("auto-detect Wine").And.NotContain("Proton");
+        model.WindowsRunnerSettingsHelp.Should().Contain("CrossOver").And.Contain("Quiver Launcher").And.NotContain("Proton");
     }
 
     [AvaloniaTheory]

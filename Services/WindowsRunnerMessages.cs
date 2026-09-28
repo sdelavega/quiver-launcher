@@ -7,7 +7,7 @@ public static class WindowsRunnerMessages
         "open this app’s menu (⋯) → Launch Options → Windows Runner to pick a runner or custom command.";
 
     public static string InstallHint => OperatingSystem.IsMacOS()
-        ? "Install Wine (for example Homebrew’s wine-stable) or Apple’s Game Porting Toolkit, or use CrossOver through a custom command"
+        ? "Install CrossOver or Wine (for example Homebrew’s wine-stable)"
         : "Install Wine/Proton";
 
     public static string NotFound =>
@@ -17,6 +17,10 @@ public static class WindowsRunnerMessages
     public static string MissingBeforeInstall =>
         "This game requires a Windows runner to launch, but none was detected.\n\n" +
         $"{InstallHint}, or after install {LaunchOptionsHint}";
+
+    public static string AutoDescription => OperatingSystem.IsMacOS()
+        ? $"Auto (Wine, then CrossOver in a “{WindowsRunnerService.CrossOverBottleName}” bottle)"
+        : "Auto (prefer Proton, then Wine)";
 
     /// <summary>Example shown in the custom command boxes.</summary>
     public static string CustomCommandExample => OperatingSystem.IsMacOS()

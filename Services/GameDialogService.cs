@@ -168,7 +168,7 @@ public static class GameDialogService
             {
                 Title = "Windows Runner Not Found",
                 Width = 500,
-                Height = 220,
+                SizeToContent = SizeToContent.Height,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Content = new StackPanel
                 {
@@ -177,8 +177,7 @@ public static class GameDialogService
                     {
                         new TextBlock
                         {
-                            Text = "This game requires a Linux Windows-runner to launch, but none was detected.\n\n" +
-                                   "Install Wine/Proton, or after install open this app’s menu (⋯) → Launch Options → Windows Runner to pick a runner or custom command.\n\n" +
+                            Text = WindowsRunnerMessages.MissingBeforeInstall + "\n\n" +
                                    "Do you want to download anyway? The game will not launch without a configured runner.",
                             TextWrapping = TextWrapping.Wrap,
                             Margin = new Thickness(0, 0, 0, 20),
@@ -232,7 +231,7 @@ public static class GameDialogService
     }
 
     /// <summary>
-    /// Lets the user pick Wine/Proton/Custom and a prefix path for a Windows app on Linux.
+    /// Lets the user pick Wine/Proton (Linux) or Wine (macOS) or a custom command, and a prefix path.
     /// Returns null if cancelled.
     /// </summary>
     public static async Task<LinuxWindowsRunnerConfig?> ShowLinuxWindowsRunnerDialogAsync(
@@ -296,7 +295,7 @@ public static class GameDialogService
                 });
             }
 
-            AddRunnerItem("Auto (prefer Proton, then Wine)", LinuxWindowsRunnerKind.Auto);
+            AddRunnerItem(OperatingSystem.IsLinux() ? "Auto (prefer Proton, then Wine)" : "Auto (Wine)", LinuxWindowsRunnerKind.Auto);
             if (wineAvailable)
                 AddRunnerItem("System Wine", LinuxWindowsRunnerKind.Wine);
             foreach (var proton in protons)
@@ -342,7 +341,7 @@ public static class GameDialogService
             var customBox = new TextBox
             {
                 Text = initial.CustomLaunchCommand ?? string.Empty,
-                Watermark = "Example: flatpak run com.usebottles.bottles -e {exe}",
+                Watermark = WindowsRunnerMessages.CustomCommandExample,
                 MinWidth = 360,
                 IsVisible = initial.Kind == LinuxWindowsRunnerKind.Custom,
             };
@@ -427,7 +426,9 @@ public static class GameDialogService
                         {
                             Text = isInstall
                                 ? "This Windows app needs Wine or Proton on Linux. Choose a runner and an isolated prefix folder for this app."
-                                : "Choose the Wine/Proton runner and prefix used when launching this Windows app.",
+                                : OperatingSystem.IsLinux()
+                                    ? "Choose the Wine/Proton runner and prefix used when launching this Windows app."
+                                    : "Choose the Wine runner and prefix used when launching this Windows app.",
                             TextWrapping = TextWrapping.Wrap,
                         },
                         new TextBlock { Text = "Runner", FontSize = 12, Opacity = 0.8 },

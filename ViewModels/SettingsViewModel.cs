@@ -137,6 +137,12 @@ public class SettingsViewModel : ObservableViewModel
     };
     public bool IsDesktopPlatform => !PlatformCapabilities.IsMobile;
     public bool IsLinuxPlatform => IsDesktopPlatform && PlatformString.Contains("Linux", StringComparison.OrdinalIgnoreCase);
+    public bool ShowWindowsRunnerSettings => IsLinuxPlatform || IsDesktopPlatform && OperatingSystem.IsMacOS();
+    public string WindowsRunnerCommandExample => WindowsRunnerMessages.CustomCommandExample;
+    public string WindowsRunnerSettingsHelp =>
+        "Global override for Windows-only apps when an app uses Auto. Use {exe}, {gamePath}, or {exeDir}. " +
+        "Per-app runner/prefix is under Launch Options → Windows Runner. " +
+        (OperatingSystem.IsMacOS() ? "Leave blank to auto-detect Wine." : "Leave blank to auto-detect Proton then Wine.");
     public bool ShowStartFullscreenSetting => IsDesktopPlatform && !SteamDeckEnvironment.IsDesktopMode();
 
     public AppSettings Load()

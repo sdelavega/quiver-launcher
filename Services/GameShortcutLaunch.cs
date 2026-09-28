@@ -65,10 +65,10 @@ public static class GameShortcutLaunch
 
     private static GameShortcutTarget BuildTarget(GameInfo game, string executable, string gamePath, AppSettings settings)
     {
-        if (OperatingSystem.IsLinux() && executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        if (PlatformCapabilities.SupportsWine && executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
         {
             var runner = WindowsRunnerService.GetWindowsRunnerCommand(settings, executable, gamePath, game)
-                ?? throw new InvalidOperationException("Configure Wine or Proton in this app’s Launch Options → Windows Runner before creating a shortcut.");
+                ?? throw new InvalidOperationException("Configure a Windows runner in this app’s Launch Options → Windows Runner before creating a shortcut.");
             return FromRunner(runner, gamePath);
         }
         return new(executable, [], Path.GetDirectoryName(executable) ?? gamePath);

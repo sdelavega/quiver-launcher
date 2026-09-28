@@ -65,7 +65,7 @@ public static class WindowsRunnerService
 
     public static bool IsWindowsRunnerAvailable(AppSettings? settings = null, GameInfo? game = null)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        if (!PlatformCapabilities.SupportsWine)
             return false;
 
         var kind = ParseRunnerKind(game?.LinuxRunner);
@@ -80,8 +80,9 @@ public static class WindowsRunnerService
             return IsWineAvailable();
 
         if (kind == LinuxWindowsRunnerKind.Proton)
-            return ListDetectedProtonInstallations().Count > 0 ||
-                   (!string.IsNullOrWhiteSpace(game?.LinuxProtonPath) && File.Exists(game.LinuxProtonPath));
+            return OperatingSystem.IsLinux() &&
+                   (ListDetectedProtonInstallations().Count > 0 ||
+                    (!string.IsNullOrWhiteSpace(game?.LinuxProtonPath) && File.Exists(game.LinuxProtonPath)));
 
         if (!string.IsNullOrWhiteSpace(settings?.LinuxWindowsLaunchCommand))
             return true;
@@ -90,8 +91,64 @@ public static class WindowsRunnerService
     }
 
     public static bool IsWineAvailable() =>
-        RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
-        (IsCommandAvailable("wine64") || IsCommandAvailable("wine"));
+        PlatformCapabilities.SupportsWine && FindWineBinary() != null;
+
+    /// <summary>
+    /// Wine installs outside the GUI PATH on macOS: an app opened from Finder only sees
+    /// /usr/bin:/bin:/usr/sbin:/sbin, not Homebrew's bin directories.
+    /// </summary>
+    internal static IReadOnlyList<string> GetMacWineCandidates(string homeDirectory)
+    {
+        var candidates = new List<string>();
+        foreach (var bin in new[] { "/opt/homebrew/bin", "/usr/local/bin" })
+            candidates.AddRange([Path.Combine(bin, "wine64"), Path.Combine(bin, "wine")]);
+
+        foreach (var applications in new[] { "/Applications", Path.Combine(homeDirectory, "Applications") })
+        {
+            foreach (var app in new[] { "Wine Stable.app", "Wine Staging.app", "Wine Devel.app" })
+            {
+                var bin = Path.Combine(applications, app, "Contents", "Resources", "wine", "bin");
+                candidates.AddRange([Path.Combine(bin, "wine64"), Path.Combine(bin, "wine")]);
+            }
+        }
+
+        // Apple's Game Porting Toolkit (installed with an x86_64 Homebrew).
+        candidates.Add("/usr/local/opt/game-porting-toolkit/bin/wine64");
+        return candidates;
+    }
+
+    /// <summary>
+    /// Wine to launch Windows apps with: <c>wine64</c> or <c>wine</c> from PATH, then (macOS) the
+    /// usual Homebrew, Wine app and Game Porting Toolkit locations as a full path.
+    /// </summary>
+    internal static string? ResolveWineBinary(bool isMacOS, Func<string, bool> isOnPath, Func<string, bool> fileExists, string homeDirectory)
+    {
+        foreach (var name in new[] { "wine64", "wine" })
+        {
+            if (isOnPath(name))
+                return name;
+        }
+
+        return isMacOS ? GetMacWineCandidates(homeDirectory).FirstOrDefault(fileExists) : null;
+    }
+
+    private static (string? Binary, long CheckedAt) _wineLookup = (null, long.MinValue);
+
+    // Download selection and status checks ask for every app; don't spawn `which` each time.
+    private static string? FindWineBinary()
+    {
+        var lookup = _wineLookup;
+        if (Environment.TickCount64 - lookup.CheckedAt < 60_000)
+            return lookup.Binary;
+
+        var binary = ResolveWineBinary(
+            OperatingSystem.IsMacOS(),
+            IsCommandAvailable,
+            File.Exists,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        _wineLookup = (binary, Environment.TickCount64);
+        return binary;
+    }
 
     public static IReadOnlyList<ProtonInstallationInfo> ListDetectedProtonInstallations()
     {
@@ -132,7 +189,7 @@ public static class WindowsRunnerService
 
         var tokens = SplitRunnerCommand(resolvedCommand);
         if (tokens.Count == 0 || string.IsNullOrWhiteSpace(tokens[0]))
-            throw new InvalidOperationException("The Linux Windows-runner command is empty.");
+            throw new InvalidOperationException("The Windows runner command is empty.");
 
         var resolvedTokens = tokens
             .Select(token => ReplaceRunnerPlaceholders(token, executablePath, gamePath))
@@ -151,7 +208,7 @@ public static class WindowsRunnerService
         string gamePath,
         GameInfo? game = null)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        if (!PlatformCapabilities.SupportsWine)
             return null;
 
         var kind = ParseRunnerKind(game?.LinuxRunner);
@@ -171,13 +228,17 @@ public static class WindowsRunnerService
             return BuildWineCommand(executablePath, gamePath, game?.LinuxPrefixPath);
 
         if (kind == LinuxWindowsRunnerKind.Proton)
-            return BuildProtonCommand(executablePath, gamePath, game?.LinuxPrefixPath, game?.LinuxProtonPath);
+            return OperatingSystem.IsLinux()
+                ? BuildProtonCommand(executablePath, gamePath, game?.LinuxPrefixPath, game?.LinuxProtonPath)
+                : null;
 
-        // Auto: global custom command, then Proton (preferred), then Wine.
+        // Auto: global custom command, then Proton (preferred, Linux only), then Wine.
         if (!string.IsNullOrWhiteSpace(settings.LinuxWindowsLaunchCommand))
             return BuildWindowsRunnerCommand(settings.LinuxWindowsLaunchCommand, executablePath, gamePath);
 
-        var proton = BuildProtonCommand(executablePath, gamePath, game?.LinuxPrefixPath, game?.LinuxProtonPath);
+        var proton = OperatingSystem.IsLinux()
+            ? BuildProtonCommand(executablePath, gamePath, game?.LinuxPrefixPath, game?.LinuxProtonPath)
+            : null;
         if (proton != null)
             return proton;
 
@@ -248,7 +309,7 @@ public static class WindowsRunnerService
         }
 
         if (escaping || inSingleQuotes || inDoubleQuotes)
-            throw new InvalidOperationException("The Linux Windows-runner command contains an unmatched quote or trailing escape character.");
+            throw new InvalidOperationException("The Windows runner command contains an unmatched quote or trailing escape character.");
 
         if (current.Length > 0)
             tokens.Add(current.ToString());
@@ -261,15 +322,19 @@ public static class WindowsRunnerService
         string gamePath,
         string? prefixPath)
     {
-        string? wineBinary = null;
-        if (IsCommandAvailable("wine64"))
-            wineBinary = "wine64";
-        else if (IsCommandAvailable("wine"))
-            wineBinary = "wine";
-
+        var wineBinary = FindWineBinary();
         if (wineBinary == null)
             return null;
 
+        return BuildWineCommand(wineBinary, executablePath, gamePath, prefixPath);
+    }
+
+    internal static WindowsRunnerCommandSpec BuildWineCommand(
+        string wineBinary,
+        string executablePath,
+        string gamePath,
+        string? prefixPath)
+    {
         var prefix = string.IsNullOrWhiteSpace(prefixPath)
             ? GetDefaultWinePrefixPath(gamePath)
             : prefixPath.Trim();
@@ -370,11 +435,14 @@ public static class WindowsRunnerService
 
     private static bool IsWineOrProtonAvailable()
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        if (!PlatformCapabilities.SupportsWine)
             return false;
 
-        if (IsCommandAvailable("wine") || IsCommandAvailable("wine64"))
+        if (FindWineBinary() != null)
             return true;
+
+        if (!OperatingSystem.IsLinux())
+            return false;
 
         foreach (var protonInstallation in GetProtonInstallations())
         {

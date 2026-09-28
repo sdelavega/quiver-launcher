@@ -1107,6 +1107,12 @@ namespace QuiverLauncher
             }
         }
 
+        public void OpenSettings()
+        {
+            if (!Shell.SettingsOpen)
+                SettingsButton_Click(this, new RoutedEventArgs());
+        }
+
         public void OpenGitHubApiTokenSettings() => OpenAdvancedApiTokenSettings(focusGitLab: false);
         public void OpenGitLabApiTokenSettings() => OpenAdvancedApiTokenSettings(focusGitLab: true);
         private void OpenAdvancedApiTokenSettings(bool focusGitLab)
